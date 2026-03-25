@@ -1,6 +1,6 @@
 /**
 
-- Bar Card v4.0.0
+- Bar Card Revamped V1.0.0
 - A custom bar/gauge card for Home Assistant dashboards.
 - 
 - Rebuilt from the ground up using modern Home Assistant standards (2026):
@@ -1000,5 +1000,5 @@ type: “bar-card”,
 name: “Bar Card”,
 preview: true,
 description: “A customizable bar/gauge card for displaying entity values as horizontal or vertical bars.”,
-documentationURL: “https://github.com/custom-cards/bar-card”,
+documentationURL: “https://github.com/tmnyhbs/HABarCardRevamped”,
 });
