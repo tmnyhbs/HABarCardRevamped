@@ -4,7 +4,7 @@ A custom bar/gauge card for [Home Assistant](https://www.home-assistant.io/) das
 
 Rebuilt from the ground up for modern Home Assistant (2026+), this card displays entity values as horizontal or vertical progress bars with rich customization options.
 
-## What's New in v4
+## What's New
 
 - **Zero build step** — single `.js` file, no bundler or transpiler needed.
 - **Modern standards** — vanilla `HTMLElement` with Shadow DOM; no decorators, no `custom-card-helpers` dependency.
