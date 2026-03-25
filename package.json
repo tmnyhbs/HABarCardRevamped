@@ -1,8 +1,8 @@
 {
-  "name": "bar-card",
+  "name": "bar-card-revamped",
   "version": "1.0.0",
-  "description": "A customizable bar/gauge card for Home Assistant dashboards",
-  "main": "dist/bar-card.js",
+  "description": "A customizable bar/gauge card for Home Assistant dashboards — revamped for modern HA",
+  "main": "bar-card.js",
   "repository": {
     "type": "git",
     "url": "https://github.com/tmnyhbs/HABarCardRevamped"
@@ -15,10 +15,10 @@
     "gauge",
     "progress"
   ],
-  "author": "Custom Cards Community",
+  "author": "tmnyhbs",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/tmnyhbs/HABarCardRevamped/issues"
   },
-  "homepage": "https://github.com/tmnyhbs/HABarCardRevamped/#readme"
+  "homepage": "https://github.com/tmnyhbs/HABarCardRevamped#readme"
 }

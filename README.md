@@ -1,4 +1,4 @@
-# Bar Card v4.0.0
+# Bar Card Revamped v1.0.0
 
 A custom bar/gauge card for [Home Assistant](https://www.home-assistant.io/) dashboards.
 
@@ -19,7 +19,7 @@ Rebuilt from the ground up for modern Home Assistant (2026+), this card displays
 ### HACS (recommended)
 
 1. Add this repository as a custom repository in HACS (Frontend category).
-2. Install **Bar Card**.
+2. Install **Bar Card Revamped**.
 3. Refresh your browser.
 
 ### Manual
@@ -201,7 +201,7 @@ width: 70%
 
 ## Credits
 
-Rebuilt from the original [bar-card](https://github.com/custom-cards/bar-card) by the custom-cards community.
+Rebuilt from the original [bar-card](https://github.com/custom-cards/bar-card) by [tmnyhbs](https://github.com/tmnyhbs).
 
 ## License
 

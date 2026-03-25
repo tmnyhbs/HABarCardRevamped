@@ -1,4 +1,4 @@
-# Bar Card
+# Bar Card Revamped
 
 A customizable bar/gauge card for Home Assistant dashboards. Display entity values as horizontal or vertical progress bars with severity colors, animations, target markers, and more.
 
@@ -38,4 +38,4 @@ entities:
     name: Disk
 ```
 
-See the [README](https://github.com/custom-cards/bar-card) for full documentation.
+See the [README](https://github.com/tmnyhbs/HABarCardRevamped) for full documentation.
