@@ -1,0 +1,24 @@
+{
+  "name": "bar-card",
+  "version": "4.0.0",
+  "description": "A customizable bar/gauge card for Home Assistant dashboards",
+  "main": "dist/bar-card.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/custom-cards/bar-card"
+  },
+  "keywords": [
+    "home-assistant",
+    "lovelace",
+    "custom-card",
+    "bar",
+    "gauge",
+    "progress"
+  ],
+  "author": "Custom Cards Community",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/custom-cards/bar-card/issues"
+  },
+  "homepage": "https://github.com/custom-cards/bar-card#readme"
+}
