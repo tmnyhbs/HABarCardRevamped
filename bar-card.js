@@ -3,8 +3,8 @@
  * A custom bar/gauge card for Home Assistant dashboards.
  *
  * Rebuilt from the ground up using modern Home Assistant standards (2026):
- *   - Vanilla LitElement (no build step, no decorators)
- *   - Built-in getConfigForm() visual editor
+ *   - Vanilla custom elements with Shadow DOM (no build step)
+ *   - Custom getConfigElement() visual editor with multi-entity support
  *   - getGridOptions() for sections view
  *   - Proper ha-card theming via CSS custom properties
  *   - Registered in window.customCards for the card picker
@@ -46,42 +46,28 @@ function percent(value, min, max) {
   return ((value - min) / (max - min)) * 100;
 }
 
-function domainIcon(entityId, state) {
-  // Minimal fallback icon resolver based on domain
+function domainIcon(entityId) {
   const domain = entityId ? entityId.split(".")[0] : "";
   const icons = {
-    sensor: "mdi:eye",
-    binary_sensor: "mdi:checkbox-blank-circle",
-    light: "mdi:lightbulb",
-    switch: "mdi:toggle-switch",
-    fan: "mdi:fan",
-    climate: "mdi:thermostat",
-    cover: "mdi:window-shutter",
-    media_player: "mdi:cast",
-    input_number: "mdi:ray-vertex",
-    number: "mdi:ray-vertex",
-    humidifier: "mdi:air-humidifier",
-    vacuum: "mdi:robot-vacuum",
-    person: "mdi:account",
-    weather: "mdi:weather-partly-cloudy",
-    water_heater: "mdi:water-boiler",
+    sensor: "mdi:eye", binary_sensor: "mdi:checkbox-blank-circle",
+    light: "mdi:lightbulb", switch: "mdi:toggle-switch", fan: "mdi:fan",
+    climate: "mdi:thermostat", cover: "mdi:window-shutter",
+    media_player: "mdi:cast", input_number: "mdi:ray-vertex",
+    number: "mdi:ray-vertex", humidifier: "mdi:air-humidifier",
+    vacuum: "mdi:robot-vacuum", person: "mdi:account",
+    weather: "mdi:weather-partly-cloudy", water_heater: "mdi:water-boiler",
   };
   return icons[domain] || "mdi:bookmark";
 }
 
-// Expand the top-level config + entities list into a flat per-entity array,
-// each entity inheriting defaults from the card-level config.
 function buildConfigArray(config) {
   const base = { ...config };
   delete base.entities;
   const arr = [];
   if (config.entities && config.entities.length) {
     for (const ent of config.entities) {
-      if (typeof ent === "string") {
-        arr.push(deepMerge({}, base, { entity: ent }));
-      } else {
-        arr.push(deepMerge({}, base, ent));
-      }
+      if (typeof ent === "string") arr.push(deepMerge({}, base, { entity: ent }));
+      else arr.push(deepMerge({}, base, ent));
     }
   } else if (config.entity) {
     arr.push(deepMerge({}, base));
@@ -89,10 +75,16 @@ function buildConfigArray(config) {
   return arr;
 }
 
-// ─── Main Card Element ───────────────────────────────────────────────────────
+function fireEvent(node, type, detail) {
+  node.dispatchEvent(new CustomEvent(type, { bubbles: true, composed: true, detail }));
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN CARD ELEMENT
+// ═══════════════════════════════════════════════════════════════════════════════
 
 class BarCard extends HTMLElement {
-  // --- HA lifecycle ----------------------------------------------------------
 
   set hass(hass) {
     this._hass = hass;
@@ -117,11 +109,8 @@ class BarCard extends HTMLElement {
         limit_value: false,
         complementary: false,
         positions: {
-          icon: "outside",
-          indicator: "outside",
-          name: "inside",
-          minmax: "off",
-          value: "inside",
+          icon: "outside", indicator: "outside",
+          name: "inside", minmax: "off", value: "inside",
         },
         tap_action: { action: "more-info" },
       },
@@ -136,16 +125,9 @@ class BarCard extends HTMLElement {
     this._prevStates = this._prevStates || {};
     this._indicators = this._indicators || {};
 
-    // Build shadow DOM once
-    if (!this.shadowRoot) {
-      this.attachShadow({ mode: "open" });
-    }
-
-    // Force re-render on config change
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
     if (this._hass) this._render();
   }
-
-  // --- Sizing ----------------------------------------------------------------
 
   getCardSize() {
     const h = typeof this._config.height === "number" ? this._config.height : parseInt(this._config.height) || 40;
@@ -156,126 +138,29 @@ class BarCard extends HTMLElement {
   getGridOptions() {
     return {
       rows: Math.max(1, Math.ceil(this._configArray.length / (this._config.columns || 1))),
-      columns: 12,
-      min_rows: 1,
-      min_columns: 3,
-    };
-  }
-
-  // --- Visual editor (built-in form) -----------------------------------------
-
-  static getConfigForm() {
-    return {
-      schema: [
-        { name: "label", selector: { label: {} } },
-        {
-          name: "entity",
-          required: true,
-          selector: { entity: {} },
-        },
-        {
-          type: "grid",
-          name: "",
-          flatten: true,
-          schema: [
-            { name: "name", selector: { text: {} } },
-            {
-              name: "icon",
-              selector: { icon: {} },
-              context: { icon_entity: "entity" },
-            },
-            {
-              name: "attribute",
-              selector: { attribute: {} },
-              context: { filter_entity: "entity" },
-            },
-            { name: "unit_of_measurement", selector: { text: {} } },
-          ],
-        },
-        {
-          type: "expandable",
-          name: "",
-          title: "Bar Appearance",
-          flatten: true,
-          schema: [
-            {
-              type: "grid",
-              name: "",
-              flatten: true,
-              schema: [
-                { name: "min", selector: { number: { mode: "box" } } },
-                { name: "max", selector: { number: { mode: "box" } } },
-                { name: "height", selector: { number: { min: 10, max: 500, unit_of_measurement: "px", mode: "box" } } },
-                { name: "decimal", selector: { number: { min: 0, max: 6, mode: "box" } } },
-                { name: "color", selector: { text: {} } },
-                {
-                  name: "direction",
-                  selector: {
-                    select: {
-                      options: [
-                        { value: "right", label: "Right" },
-                        { value: "up", label: "Up" },
-                        { value: "right-reverse", label: "Right (reverse)" },
-                        { value: "up-reverse", label: "Up (reverse)" },
-                      ],
-                    },
-                  },
-                },
-              ],
-            },
-            { name: "limit_value", selector: { boolean: {} } },
-            { name: "complementary", selector: { boolean: {} } },
-          ],
-        },
-      ],
-      computeLabel: (s) => {
-        const labels = {
-          entity: "Entity",
-          name: "Name",
-          icon: "Icon",
-          attribute: "Attribute",
-          unit_of_measurement: "Unit",
-          min: "Min Value",
-          max: "Max Value",
-          height: "Bar Height",
-          decimal: "Decimal Places",
-          color: "Bar Color",
-          direction: "Direction",
-          limit_value: "Clamp Value to Min/Max",
-          complementary: "Show Complementary Value",
-        };
-        return labels[s.name] ?? undefined;
-      },
+      columns: 12, min_rows: 1, min_columns: 3,
     };
   }
 
   static getConfigElement() {
-    // Let HA use the built-in form editor via getConfigForm
-    return undefined;
+    return document.createElement("bar-card-editor");
   }
 
   static getStubConfig() {
-    return {
-      entity: "sensor.example",
-      min: 0,
-      max: 100,
-    };
+    return { entity: "", min: 0, max: 100 };
   }
 
-  // --- Rendering -------------------------------------------------------------
+  // ─── Rendering ──────────────────────────────────────────────────────────────
 
   _render() {
     if (!this._hass || !this._config) return;
-
     const root = this.shadowRoot;
     root.innerHTML = "";
 
-    // Styles
     const style = document.createElement("style");
     style.textContent = BarCard._styles();
     root.appendChild(style);
 
-    // ha-card wrapper
     const card = document.createElement("ha-card");
     if (this._config.title) card.setAttribute("header", this._config.title);
     if (this._config.entity_row) card.classList.add("entity-row-mode");
@@ -285,18 +170,12 @@ class BarCard extends HTMLElement {
     if (this._config.direction === "up") content.classList.add("grow");
 
     const columns = this._config.columns || 1;
-
-    // Build rows
-    const rows = [];
     for (let i = 0; i < this._configArray.length; i += columns) {
       const rowEl = document.createElement("div");
       rowEl.className = "bar-row";
       if (columns > 1) rowEl.classList.add("multi-col");
-
       for (let c = 0; c < columns && i + c < this._configArray.length; c++) {
-        const idx = i + c;
-        const cfg = this._configArray[idx];
-        const barEl = this._createBar(cfg, idx);
+        const barEl = this._createBar(this._configArray[i + c], i + c);
         if (barEl) rowEl.appendChild(barEl);
       }
       content.appendChild(rowEl);
@@ -317,64 +196,37 @@ class BarCard extends HTMLElement {
       return warn;
     }
 
-    // Resolve value
     let rawValue = config.attribute ? stateObj.attributes[config.attribute] : stateObj.state;
     const isNumeric = !isNaN(Number(rawValue)) && rawValue !== "" && rawValue !== null;
     let numericValue = isNumeric ? Number(rawValue) : null;
 
-    // Severity hide check
-    if (config.severity && this._checkSeverityHide(rawValue, numericValue, config.severity)) {
-      return null;
-    }
+    if (config.severity && this._checkSeverityHide(rawValue, numericValue, config.severity)) return null;
+    if (config.limit_value && numericValue !== null) numericValue = clamp(numericValue, config.min, config.max);
 
-    // Limit / clamp
-    if (config.limit_value && numericValue !== null) {
-      numericValue = clamp(numericValue, config.min, config.max);
-    }
-
-    // Format display value
     let displayValue;
     if (numericValue !== null) {
       if (config.complementary) numericValue = config.max - numericValue;
-      displayValue =
-        config.decimal != null ? numericValue.toFixed(config.decimal) : String(numericValue);
+      displayValue = config.decimal != null ? numericValue.toFixed(config.decimal) : String(numericValue);
     } else {
       displayValue = String(rawValue);
     }
 
-    // Compute bar percent (always from unclamped non-complementary value)
-    let barSourceValue = config.attribute
-      ? Number(stateObj.attributes[config.attribute])
-      : Number(stateObj.state);
+    let barSourceValue = config.attribute ? Number(stateObj.attributes[config.attribute]) : Number(stateObj.state);
     if (isNaN(barSourceValue)) barSourceValue = null;
     if (config.limit_value && barSourceValue !== null) barSourceValue = clamp(barSourceValue, config.min, config.max);
 
     let barPct = 0;
-    if (rawValue === "unavailable" || rawValue === "unknown") {
-      barPct = 0;
-    } else if (barSourceValue !== null) {
-      barPct = percent(barSourceValue, config.min, config.max);
-    } else {
-      barPct = 100;
-    }
+    if (rawValue === "unavailable" || rawValue === "unknown") barPct = 0;
+    else if (barSourceValue !== null) barPct = percent(barSourceValue, config.min, config.max);
+    else barPct = 100;
 
-    // Reverse directions
-    if (config.direction && config.direction.endsWith("-reverse")) {
-      barPct = 100 - barPct;
-    }
-
+    if (config.direction && config.direction.endsWith("-reverse")) barPct = 100 - barPct;
     barPct = clamp(barPct, 0, 100);
 
-    // Determine bar color (severity or config)
     let barColor = config.color;
-    if (config.severity) {
-      barColor = this._severityColor(rawValue, numericValue, config.severity) || barColor;
-    }
-    if (rawValue === "unavailable") {
-      barColor = `var(--bar-card-disabled-color, var(--disabled-color, ${config.color}))`;
-    }
+    if (config.severity) barColor = this._severityColor(rawValue, numericValue, config.severity) || barColor;
+    if (rawValue === "unavailable") barColor = `var(--bar-card-disabled-color, var(--disabled-color, ${config.color}))`;
 
-    // Indicator
     const prevKey = `${config.entity}_${config.attribute || ""}`;
     const prevVal = this._prevStates[prevKey];
     let indicator = this._indicators[prevKey] || "";
@@ -385,45 +237,26 @@ class BarCard extends HTMLElement {
     if (isNumeric) this._prevStates[prevKey] = Number(rawValue);
     this._indicators[prevKey] = indicator;
 
-    // Icon
     let icon = null;
     if (config.severity) icon = this._severityIcon(rawValue, numericValue, config.severity);
-    if (!icon) icon = config.icon || stateObj.attributes.icon || domainIcon(config.entity, rawValue);
+    if (!icon) icon = config.icon || stateObj.attributes.icon || domainIcon(config.entity);
 
-    // Name
     const name = config.name || stateObj.attributes.friendly_name || config.entity;
-
-    // Unit
     let unit = "";
-    if (isNumeric) {
-      unit = config.unit_of_measurement ?? stateObj.attributes.unit_of_measurement ?? "";
-    }
+    if (isNumeric) unit = config.unit_of_measurement ?? stateObj.attributes.unit_of_measurement ?? "";
 
-    // Direction flags
     const isVertical = config.direction === "up" || config.direction === "up-reverse";
     const barDirection = isVertical ? "top" : "right";
+    const heightStr = typeof config.height === "number" ? `${config.height}px` : config.height;
+    const positions = config.positions || {};
 
-    // Build height
-    let heightStr = typeof config.height === "number" ? `${config.height}px` : config.height;
-
-    // --- DOM construction ---
     const wrapper = document.createElement("div");
     wrapper.className = `bar-wrapper ${isVertical ? "vertical" : "horizontal"}`;
     wrapper.addEventListener("click", () => this._handleTap(config));
 
-    const positions = config.positions || {};
+    if (positions.icon === "outside") wrapper.appendChild(this._iconEl(icon));
+    if (positions.indicator === "outside" && !isVertical) wrapper.appendChild(this._indicatorEl(indicator, barColor, "outside-right"));
 
-    // Icon outside
-    if (positions.icon === "outside") {
-      wrapper.appendChild(this._iconEl(icon));
-    }
-
-    // Indicator outside
-    if (positions.indicator === "outside" && !isVertical) {
-      wrapper.appendChild(this._indicatorEl(indicator, barColor, "outside-right"));
-    }
-
-    // Name outside
     if (positions.name === "outside") {
       const nameEl = document.createElement("span");
       nameEl.className = "bar-name outside";
@@ -432,40 +265,28 @@ class BarCard extends HTMLElement {
       wrapper.appendChild(nameEl);
     }
 
-    // --- Bar background container ---
     const bg = document.createElement("div");
     bg.className = "bar-background";
     bg.style.height = heightStr;
-    if (config.width) {
-      bg.style.width = config.width;
-      wrapper.style.alignItems = "center";
-    }
+    if (config.width) { bg.style.width = config.width; wrapper.style.alignItems = "center"; }
 
-    // Background tint
     const bgBar = document.createElement("div");
     bgBar.className = "bar-bg-tint";
     bgBar.style.setProperty("--bar-color", barColor);
     bg.appendChild(bgBar);
 
-    // Animation bar
     if (config.animation && config.animation.state === "on" && indicator) {
       const animBar = document.createElement("div");
       animBar.className = `bar-animation ${isVertical ? "anim-vertical" : "anim-horizontal"}`;
       animBar.style.setProperty("--bar-color", barColor);
       animBar.style.setProperty("--bar-percent", `${barPct}%`);
-      const animName =
-        indicator === "▲"
-          ? isVertical
-            ? "anim-increase-v"
-            : "anim-increase-h"
-          : isVertical
-          ? "anim-decrease-v"
-          : "anim-decrease-h";
+      const animName = indicator === "▲"
+        ? (isVertical ? "anim-increase-v" : "anim-increase-h")
+        : (isVertical ? "anim-decrease-v" : "anim-decrease-h");
       animBar.style.animation = `${animName} ${config.animation.speed}s infinite ease-out`;
       bg.appendChild(animBar);
     }
 
-    // Current bar fill
     const currentBar = document.createElement("div");
     currentBar.className = "bar-current";
     currentBar.style.setProperty("--bar-color", barColor);
@@ -473,10 +294,8 @@ class BarCard extends HTMLElement {
     currentBar.style.setProperty("--bar-direction", barDirection);
     bg.appendChild(currentBar);
 
-    // Target marker
     if (config.target != null) {
-      let targetPct = percent(config.target, config.min, config.max);
-      targetPct = clamp(targetPct, 0, 100);
+      let targetPct = clamp(percent(config.target, config.min, config.max), 0, 100);
       let tStart = Math.min(barPct, targetPct);
       let tEnd = Math.max(barPct, targetPct);
 
@@ -491,103 +310,71 @@ class BarCard extends HTMLElement {
       const marker = document.createElement("div");
       marker.className = `bar-marker ${isVertical ? "marker-v" : "marker-h"}`;
       marker.style.setProperty("--bar-color", barColor);
-      if (isVertical) {
-        marker.style.bottom = `${targetPct}%`;
-      } else {
-        marker.style.left = `${targetPct}%`;
-      }
+      if (isVertical) marker.style.bottom = `${targetPct}%`;
+      else marker.style.left = `${targetPct}%`;
       bg.appendChild(marker);
     }
 
-    // Content bar (items inside the bar)
     const contentBar = document.createElement("div");
     contentBar.className = `bar-content ${isVertical ? "content-vertical" : "content-horizontal"}`;
 
     if (positions.icon === "inside") contentBar.appendChild(this._iconEl(icon));
     if (positions.indicator === "inside") contentBar.appendChild(this._indicatorEl(indicator, barColor, ""));
-
     if (positions.name === "inside") {
-      const nameEl = document.createElement("span");
-      nameEl.className = "bar-name";
-      nameEl.textContent = name;
-      contentBar.appendChild(nameEl);
+      const n = document.createElement("span"); n.className = "bar-name"; n.textContent = name;
+      contentBar.appendChild(n);
     }
-
-    if (positions.minmax === "inside") {
-      contentBar.appendChild(this._minMaxEl(config.min, config.max, unit, isVertical, "inside"));
-    }
-
+    if (positions.minmax === "inside") contentBar.appendChild(this._minMaxEl(config.min, config.max, unit, isVertical, "inside"));
     if (positions.value === "inside") {
-      const valEl = document.createElement("span");
-      valEl.className = `bar-value ${
-        positions.minmax !== "inside" ? (isVertical ? "val-push-vertical" : "val-push-right") : ""
-      }`;
-      valEl.textContent = `${displayValue} ${unit}`.trim();
-      contentBar.appendChild(valEl);
+      const v = document.createElement("span");
+      v.className = `bar-value ${positions.minmax !== "inside" ? (isVertical ? "val-push-vertical" : "val-push-right") : ""}`;
+      v.textContent = `${displayValue} ${unit}`.trim();
+      contentBar.appendChild(v);
     }
 
     bg.appendChild(contentBar);
     wrapper.appendChild(bg);
 
-    // Minmax outside
-    if (positions.minmax === "outside") {
-      wrapper.appendChild(this._minMaxEl(config.min, config.max, unit, isVertical, "outside"));
-    }
-
-    // Value outside
+    if (positions.minmax === "outside") wrapper.appendChild(this._minMaxEl(config.min, config.max, unit, isVertical, "outside"));
     if (positions.value === "outside") {
-      const valEl = document.createElement("span");
-      valEl.className = `bar-value ${isVertical ? "val-push-vertical" : "val-push-right"}`;
-      valEl.textContent = `${displayValue} ${unit}`.trim();
-      wrapper.appendChild(valEl);
+      const v = document.createElement("span");
+      v.className = `bar-value ${isVertical ? "val-push-vertical" : "val-push-right"}`;
+      v.textContent = `${displayValue} ${unit}`.trim();
+      wrapper.appendChild(v);
     }
-
-    // Indicator outside (vertical position – below bar)
-    if (positions.indicator === "outside" && isVertical) {
-      wrapper.appendChild(this._indicatorEl(indicator, barColor, "outside-up"));
-    }
+    if (positions.indicator === "outside" && isVertical) wrapper.appendChild(this._indicatorEl(indicator, barColor, "outside-up"));
 
     return wrapper;
   }
 
-  // --- Small DOM helpers -----------------------------------------------------
-
   _iconEl(icon) {
-    const wrap = document.createElement("div");
-    wrap.className = "bar-icon";
-    const haIcon = document.createElement("ha-icon");
-    haIcon.setAttribute("icon", icon);
-    wrap.appendChild(haIcon);
-    return wrap;
+    const wrap = document.createElement("div"); wrap.className = "bar-icon";
+    const haIcon = document.createElement("ha-icon"); haIcon.setAttribute("icon", icon);
+    wrap.appendChild(haIcon); return wrap;
   }
 
   _indicatorEl(text, color, cls) {
     const el = document.createElement("span");
-    el.className = `bar-indicator ${cls}`;
-    el.style.color = color;
-    el.textContent = text;
+    el.className = `bar-indicator ${cls}`; el.style.color = color; el.textContent = text;
     return el;
   }
 
   _minMaxEl(min, max, unit, isVertical, position) {
     const frag = document.createElement("span");
     frag.className = `bar-minmax ${position}`;
-    frag.innerHTML = `<span class="mm-min ${isVertical ? "mm-push-vertical" : "mm-push-right"}">${min}${unit}</span>` +
+    frag.innerHTML =
+      `<span class="mm-min ${isVertical ? "mm-push-vertical" : "mm-push-right"}">${min}${unit}</span>` +
       `<span class="mm-div">/</span>` +
       `<span class="mm-max">${max}${unit}</span>`;
     return frag;
   }
-
-  // --- Severity helpers ------------------------------------------------------
 
   _checkSeverityHide(rawValue, numericValue, severity) {
     if (!severity) return false;
     for (const s of severity) {
       if (numericValue !== null && s.from != null && s.to != null) {
         if (numericValue >= s.from && numericValue <= s.to && s.hide) return true;
-      } else if (s.text != null && rawValue === s.text && s.hide) {
-        return true;
-      }
+      } else if (s.text != null && rawValue === s.text && s.hide) return true;
     }
     return false;
   }
@@ -597,9 +384,7 @@ class BarCard extends HTMLElement {
     for (const s of severity) {
       if (numericValue !== null && s.from != null && s.to != null) {
         if (numericValue >= s.from && numericValue <= s.to) return s.color;
-      } else if (s.text != null && rawValue === s.text) {
-        return s.color;
-      }
+      } else if (s.text != null && rawValue === s.text) return s.color;
     }
     return null;
   }
@@ -609,14 +394,10 @@ class BarCard extends HTMLElement {
     for (const s of severity) {
       if (numericValue !== null && s.from != null && s.to != null) {
         if (numericValue >= s.from && numericValue <= s.to && s.icon) return s.icon;
-      } else if (s.text != null && rawValue === s.text && s.icon) {
-        return s.icon;
-      }
+      } else if (s.text != null && rawValue === s.text && s.icon) return s.icon;
     }
     return null;
   }
-
-  // --- Action handling -------------------------------------------------------
 
   _handleTap(config) {
     if (!this._hass) return;
@@ -632,143 +413,49 @@ class BarCard extends HTMLElement {
       this._hass.callService(domain, service, action.service_data || {});
     } else if (action.action === "navigate" && action.navigation_path) {
       history.pushState(null, "", action.navigation_path);
-      const navEv = new Event("location-changed", { bubbles: true, composed: true });
-      navEv.detail = { replace: false };
-      window.dispatchEvent(navEv);
+      window.dispatchEvent(new CustomEvent("location-changed", { bubbles: true, composed: true, detail: { replace: false } }));
     } else if (action.action === "url" && action.url_path) {
       window.open(action.url_path);
     }
   }
 
-  // --- Styles ----------------------------------------------------------------
-
   static _styles() {
-    return `
-      :host {
-        display: block;
-      }
-      ha-card {
-        display: flex;
-        flex-direction: column;
-        height: 100%;
-        overflow: hidden;
-      }
-      ha-card.entity-row-mode {
-        background: transparent;
-        box-shadow: none;
-        border: none;
-      }
-      .card-content {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        padding: 16px;
-        flex-grow: 0;
-      }
-      .card-content.grow {
-        flex-grow: 1;
-      }
-      ha-card.entity-row-mode .card-content {
-        padding: 0;
-      }
+    return /* css */ `
+      :host { display: block; }
+      ha-card { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+      ha-card.entity-row-mode { background: transparent; box-shadow: none; border: none; }
+      .card-content { display: flex; flex-direction: column; gap: 8px; padding: 16px; flex-grow: 0; }
+      .card-content.grow { flex-grow: 1; }
+      ha-card.entity-row-mode .card-content { padding: 0; }
 
-      /* Rows */
-      .bar-row {
-        display: flex;
-        flex-direction: column;
-      }
-      .bar-row.multi-col {
-        flex-direction: row;
-        gap: 8px;
-      }
-      .bar-row.multi-col > * {
-        flex: 1 1 0;
-        min-width: 0;
-      }
+      .bar-row { display: flex; flex-direction: column; }
+      .bar-row.multi-col { flex-direction: row; gap: 8px; }
+      .bar-row.multi-col > * { flex: 1 1 0; min-width: 0; }
 
-      /* Bar wrapper */
-      .bar-wrapper {
-        display: flex;
-        align-items: stretch;
-        cursor: pointer;
-      }
-      .bar-wrapper.horizontal {
-        flex-direction: row;
-        align-items: center;
-      }
-      .bar-wrapper.vertical {
-        flex-direction: column-reverse;
-        align-items: center;
-      }
+      .bar-wrapper { display: flex; cursor: pointer; }
+      .bar-wrapper.horizontal { flex-direction: row; align-items: center; }
+      .bar-wrapper.vertical { flex-direction: column-reverse; align-items: center; }
 
-      /* Bar background */
       .bar-background {
-        flex: 1 1 auto;
-        position: relative;
+        flex: 1 1 auto; position: relative;
         border-radius: var(--bar-card-border-radius, var(--ha-card-border-radius, 6px));
-        overflow: hidden;
-        min-width: 0;
+        overflow: hidden; min-width: 0;
       }
-
-      /* Background tint */
-      .bar-bg-tint {
-        position: absolute;
-        inset: 0;
-        background: var(--bar-color);
-        opacity: 0.15;
-      }
-
-      /* Current fill */
+      .bar-bg-tint { position: absolute; inset: 0; background: var(--bar-color); opacity: 0.15; }
       .bar-current {
-        position: absolute;
-        inset: 0;
-        background: linear-gradient(
-          to var(--bar-direction, right),
-          var(--bar-color) var(--bar-percent, 0%),
-          transparent var(--bar-percent, 0%)
-        );
-        transition: --bar-percent 0.8s ease;
+        position: absolute; inset: 0;
+        background: linear-gradient(to var(--bar-direction, right), var(--bar-color) var(--bar-percent, 0%), transparent var(--bar-percent, 0%));
       }
-
-      /* Target bar */
       .bar-target {
-        position: absolute;
-        inset: 0;
-        background: linear-gradient(
-          to var(--bar-direction, right),
-          transparent var(--bar-start, 0%),
-          var(--bar-color) var(--bar-start, 0%),
-          var(--bar-color) var(--bar-end, 0%),
-          transparent var(--bar-end, 0%)
-        );
+        position: absolute; inset: 0;
+        background: linear-gradient(to var(--bar-direction, right), transparent var(--bar-start, 0%), var(--bar-color) var(--bar-start, 0%), var(--bar-color) var(--bar-end, 0%), transparent var(--bar-end, 0%));
         opacity: 0.2;
       }
+      .bar-marker { position: absolute; background: var(--bar-color); opacity: 0.6; filter: brightness(0.75); }
+      .bar-marker.marker-h { top: 0; bottom: 0; width: 2px; transform: translateX(-1px); }
+      .bar-marker.marker-v { left: 0; right: 0; height: 2px; transform: translateY(1px); }
 
-      /* Target marker */
-      .bar-marker {
-        position: absolute;
-        background: var(--bar-color);
-        opacity: 0.6;
-        filter: brightness(0.75);
-      }
-      .bar-marker.marker-h {
-        top: 0; bottom: 0;
-        width: 2px;
-        transform: translateX(-1px);
-      }
-      .bar-marker.marker-v {
-        left: 0; right: 0;
-        height: 2px;
-        transform: translateY(1px);
-      }
-
-      /* Animation bar */
-      .bar-animation {
-        position: absolute;
-        inset: 0;
-        opacity: 0;
-        filter: brightness(0.75);
-      }
+      .bar-animation { position: absolute; inset: 0; opacity: 0; filter: brightness(0.75); }
       .anim-horizontal {
         background: linear-gradient(to right, var(--bar-color) 0%, var(--bar-color) 1%, transparent 1%);
         background-repeat: no-repeat;
@@ -777,7 +464,6 @@ class BarCard extends HTMLElement {
         background: linear-gradient(to bottom, transparent 0%, transparent 1%, var(--bar-color) 1%);
         background-repeat: no-repeat;
       }
-
       @keyframes anim-increase-h {
         0%   { opacity: 0.5; background-size: var(--bar-percent) 100%; }
         100% { opacity: 0;   background-size: 10000% 100%; }
@@ -795,101 +481,491 @@ class BarCard extends HTMLElement {
         100% { opacity: 0.5; background-size: 100% var(--bar-percent); }
       }
 
-      /* Content inside bar */
       .bar-content {
-        position: absolute;
-        inset: 0;
-        display: flex;
-        align-items: center;
-        color: var(--primary-text-color);
-        z-index: 1;
-        padding: 0 4px;
-        overflow: hidden;
-        gap: 4px;
+        position: absolute; inset: 0; display: flex; align-items: center;
+        color: var(--primary-text-color); z-index: 1; padding: 0 4px; overflow: hidden; gap: 4px;
       }
-      .content-horizontal {
-        flex-direction: row;
-      }
-      .content-vertical {
-        flex-direction: column;
-        justify-content: flex-end;
-        padding: 4px 0;
-      }
+      .content-horizontal { flex-direction: row; }
+      .content-vertical { flex-direction: column; justify-content: flex-end; padding: 4px 0; }
 
-      /* Icon */
       .bar-icon {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 40px;
-        min-width: 40px;
-        height: 40px;
+        display: flex; align-items: center; justify-content: center;
+        width: 40px; min-width: 40px; height: 40px;
         color: var(--icon-color, var(--state-icon-color, var(--paper-item-icon-color)));
       }
-
-      /* Name */
-      .bar-name {
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        margin: 0 4px;
-      }
-      .bar-name.outside {
-        margin-left: 16px;
-      }
-
-      /* Value */
-      .bar-value {
-        white-space: nowrap;
-        margin: 0 4px;
-      }
-      .val-push-right {
-        margin-left: auto;
-      }
-      .val-push-vertical {
-        margin-top: auto;
-      }
-
-      /* Indicator */
-      .bar-indicator {
-        font-size: 12px;
-        min-width: 14px;
-        text-align: center;
-        filter: brightness(0.75);
-      }
-      .outside-right {
-        margin-right: -2px;
-        position: relative;
-        left: -4px;
-      }
-
-      /* MinMax */
-      .bar-minmax {
-        display: inline-flex;
-        align-items: center;
-        font-size: 10px;
-        opacity: 0.5;
-        gap: 1px;
-        white-space: nowrap;
-      }
+      .bar-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0 4px; }
+      .bar-name.outside { margin-left: 16px; }
+      .bar-value { white-space: nowrap; margin: 0 4px; }
+      .val-push-right { margin-left: auto; }
+      .val-push-vertical { margin-top: auto; }
+      .bar-indicator { font-size: 12px; min-width: 14px; text-align: center; filter: brightness(0.75); }
+      .outside-right { margin-right: -2px; position: relative; left: -4px; }
+      .bar-minmax { display: inline-flex; align-items: center; font-size: 10px; opacity: 0.5; gap: 1px; white-space: nowrap; }
       .mm-push-right { margin-left: auto; }
       .mm-push-vertical { margin-top: auto; }
-
-      /* Warning */
-      .warning {
-        background: #fce588;
-        color: #333;
-        padding: 8px;
-        border-radius: 4px;
-        font-size: 13px;
-      }
+      .warning { background: #fce588; color: #333; padding: 8px; border-radius: 4px; font-size: 13px; }
     `;
   }
 }
 
 customElements.define("bar-card", BarCard);
 
-// Register in the card picker
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EDITOR ELEMENT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class BarCardEditor extends HTMLElement {
+
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._config = {};
+    this._hass = null;
+    this._expandedEntity = -1;
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (this.shadowRoot) {
+      this.shadowRoot.querySelectorAll("ha-entity-picker").forEach((el) => {
+        el.hass = hass;
+      });
+    }
+  }
+
+  setConfig(config) {
+    this._config = { ...config };
+
+    // Normalise: single entity → entities array for editor
+    if (this._config.entity && !this._config.entities) {
+      this._config.entities = [{ entity: this._config.entity }];
+      delete this._config.entity;
+    }
+    if (!this._config.entities) this._config.entities = [];
+
+    this._config.entities = this._config.entities.map((e) =>
+      typeof e === "string" ? { entity: e } : { ...e }
+    );
+
+    this._render();
+  }
+
+  _fireConfigChanged() {
+    const cfg = { ...this._config };
+
+    // Flatten single entity back if no per-entity overrides
+    if (cfg.entities && cfg.entities.length === 1) {
+      const ent = cfg.entities[0];
+      const overrideKeys = Object.keys(ent).filter((k) => k !== "entity");
+      if (overrideKeys.length === 0) {
+        cfg.entity = ent.entity;
+        delete cfg.entities;
+      }
+    }
+
+    fireEvent(this, "config-changed", { config: cfg });
+  }
+
+  // ─── Full editor render ────────────────────────────────────────────────────
+
+  _render() {
+    const root = this.shadowRoot;
+    root.innerHTML = "";
+
+    const style = document.createElement("style");
+    style.textContent = BarCardEditor._styles();
+    root.appendChild(style);
+
+    const wrap = document.createElement("div");
+    wrap.className = "editor";
+
+    // ── TITLE ──
+    wrap.appendChild(this._field("Title", "text", this._config.title || "", (v) => {
+      if (v) this._config.title = v; else delete this._config.title;
+      this._fireConfigChanged();
+    }));
+
+    // ── ENTITIES LIST ──
+    const entSection = document.createElement("div");
+    entSection.className = "section";
+
+    const entHeader = document.createElement("div");
+    entHeader.className = "section-header";
+    entHeader.innerHTML = `<span>Entities</span>`;
+    entSection.appendChild(entHeader);
+
+    const entList = document.createElement("div");
+    entList.className = "entity-list";
+
+    (this._config.entities || []).forEach((entCfg, idx) => {
+      entList.appendChild(this._entityRow(entCfg, idx));
+    });
+
+    entSection.appendChild(entList);
+
+    // Add entity button
+    const addBtn = document.createElement("ha-button");
+    addBtn.textContent = "Add Entity";
+    addBtn.addEventListener("click", () => {
+      this._config.entities = this._config.entities || [];
+      this._config.entities.push({ entity: "" });
+      this._fireConfigChanged();
+      this._render();
+    });
+    entSection.appendChild(addBtn);
+    wrap.appendChild(entSection);
+
+    // ── GLOBAL APPEARANCE (collapsible) ──
+    const appSection = document.createElement("div");
+    appSection.className = "section";
+    const appHeader = document.createElement("div");
+    appHeader.className = "section-header clickable";
+    appHeader.innerHTML = `<span>Appearance</span><ha-icon icon="mdi:chevron-down"></ha-icon>`;
+    let appOpen = false;
+    const appBody = document.createElement("div");
+    appBody.className = "section-body";
+    appBody.style.display = "none";
+
+    appHeader.addEventListener("click", () => {
+      appOpen = !appOpen;
+      appBody.style.display = appOpen ? "block" : "none";
+      appHeader.querySelector("ha-icon").setAttribute("icon", appOpen ? "mdi:chevron-up" : "mdi:chevron-down");
+    });
+    appSection.appendChild(appHeader);
+
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    grid.appendChild(this._field("Min", "number", this._config.min ?? 0, (v) => {
+      this._config.min = v !== "" ? Number(v) : 0; this._fireConfigChanged();
+    }));
+    grid.appendChild(this._field("Max", "number", this._config.max ?? 100, (v) => {
+      this._config.max = v !== "" ? Number(v) : 100; this._fireConfigChanged();
+    }));
+    grid.appendChild(this._field("Height (px)", "number", this._config.height ?? 40, (v) => {
+      this._config.height = v !== "" ? Number(v) : 40; this._fireConfigChanged();
+    }));
+    grid.appendChild(this._field("Decimals", "number", this._config.decimal ?? "", (v) => {
+      if (v !== "" && v !== null) this._config.decimal = Number(v); else delete this._config.decimal;
+      this._fireConfigChanged();
+    }));
+    grid.appendChild(this._field("Columns", "number", this._config.columns ?? 1, (v) => {
+      this._config.columns = v !== "" ? Number(v) : 1; this._fireConfigChanged();
+    }));
+    grid.appendChild(this._field("Color", "text", this._config.color ?? "", (v) => {
+      if (v) this._config.color = v; else delete this._config.color; this._fireConfigChanged();
+    }));
+    grid.appendChild(this._field("Target", "number", this._config.target ?? "", (v) => {
+      if (v !== "" && v !== null) this._config.target = Number(v); else delete this._config.target;
+      this._fireConfigChanged();
+    }));
+    appBody.appendChild(grid);
+
+    // Direction
+    appBody.appendChild(this._select("Direction", this._config.direction || "right", [
+      { value: "right", label: "Right" }, { value: "up", label: "Up" },
+      { value: "right-reverse", label: "Right (reverse)" }, { value: "up-reverse", label: "Up (reverse)" },
+    ], (v) => { this._config.direction = v; this._fireConfigChanged(); }));
+
+    // Positions
+    const posLabel = document.createElement("div");
+    posLabel.className = "sub-label"; posLabel.textContent = "Element Positions";
+    appBody.appendChild(posLabel);
+
+    const posGrid = document.createElement("div");
+    posGrid.className = "grid";
+    const posOpts = [
+      { value: "inside", label: "Inside" }, { value: "outside", label: "Outside" }, { value: "off", label: "Off" },
+    ];
+    const positions = this._config.positions || {};
+    for (const key of ["icon", "indicator", "name", "value", "minmax"]) {
+      const def = key === "minmax" ? "off" : (key === "name" || key === "value") ? "inside" : "outside";
+      posGrid.appendChild(this._select(
+        key.charAt(0).toUpperCase() + key.slice(1), positions[key] || def, posOpts,
+        (v) => {
+          if (!this._config.positions) this._config.positions = {};
+          this._config.positions[key] = v; this._fireConfigChanged();
+        }
+      ));
+    }
+    appBody.appendChild(posGrid);
+
+    // Toggles
+    const toggleGrid = document.createElement("div");
+    toggleGrid.className = "grid";
+    toggleGrid.appendChild(this._toggle("Limit Value", this._config.limit_value || false, (v) => {
+      this._config.limit_value = v; this._fireConfigChanged();
+    }));
+    toggleGrid.appendChild(this._toggle("Complementary", this._config.complementary || false, (v) => {
+      this._config.complementary = v; this._fireConfigChanged();
+    }));
+    toggleGrid.appendChild(this._toggle("Entity Row", this._config.entity_row || false, (v) => {
+      this._config.entity_row = v; this._fireConfigChanged();
+    }));
+    appBody.appendChild(toggleGrid);
+
+    // Animation
+    const animLabel = document.createElement("div");
+    animLabel.className = "sub-label"; animLabel.textContent = "Animation";
+    appBody.appendChild(animLabel);
+    const animGrid = document.createElement("div");
+    animGrid.className = "grid";
+    const anim = this._config.animation || {};
+    animGrid.appendChild(this._select("State", anim.state || "off", [
+      { value: "off", label: "Off" }, { value: "on", label: "On" },
+    ], (v) => {
+      if (!this._config.animation) this._config.animation = {};
+      this._config.animation.state = v; this._fireConfigChanged();
+    }));
+    animGrid.appendChild(this._field("Speed (s)", "number", anim.speed ?? 5, (v) => {
+      if (!this._config.animation) this._config.animation = {};
+      this._config.animation.speed = v !== "" ? Number(v) : 5; this._fireConfigChanged();
+    }));
+    appBody.appendChild(animGrid);
+
+    appSection.appendChild(appBody);
+    wrap.appendChild(appSection);
+    root.appendChild(wrap);
+
+    // Assign hass to entity pickers
+    if (this._hass) {
+      root.querySelectorAll("ha-entity-picker").forEach((el) => { el.hass = this._hass; });
+    }
+  }
+
+  // ─── Entity row with expand/collapse per-entity options ────────────────────
+
+  _entityRow(entCfg, idx) {
+    const row = document.createElement("div");
+    row.className = "entity-row";
+
+    const main = document.createElement("div");
+    main.className = "entity-main";
+
+    // Entity picker
+    const picker = document.createElement("ha-entity-picker");
+    picker.allowCustomEntity = true;
+    if (this._hass) picker.hass = this._hass;
+    picker.value = entCfg.entity || "";
+    picker.addEventListener("value-changed", (ev) => {
+      this._config.entities[idx].entity = ev.detail.value || "";
+      this._fireConfigChanged();
+    });
+    main.appendChild(picker);
+
+    // Per-entity options toggle
+    const optBtn = document.createElement("ha-icon-button");
+    optBtn.innerHTML = `<ha-icon icon="mdi:${this._expandedEntity === idx ? "chevron-up" : "tune"}"></ha-icon>`;
+    optBtn.title = "Entity options";
+    optBtn.addEventListener("click", () => {
+      this._expandedEntity = this._expandedEntity === idx ? -1 : idx;
+      this._render();
+    });
+    main.appendChild(optBtn);
+
+    // Move up
+    const upBtn = document.createElement("ha-icon-button");
+    upBtn.innerHTML = `<ha-icon icon="mdi:arrow-up"></ha-icon>`;
+    upBtn.style.opacity = idx === 0 ? "0.3" : "1";
+    if (idx > 0) {
+      upBtn.addEventListener("click", () => {
+        const arr = this._config.entities;
+        [arr[idx - 1], arr[idx]] = [arr[idx], arr[idx - 1]];
+        if (this._expandedEntity === idx) this._expandedEntity = idx - 1;
+        this._fireConfigChanged(); this._render();
+      });
+    }
+    main.appendChild(upBtn);
+
+    // Move down
+    const downBtn = document.createElement("ha-icon-button");
+    downBtn.innerHTML = `<ha-icon icon="mdi:arrow-down"></ha-icon>`;
+    const isLast = idx >= (this._config.entities || []).length - 1;
+    downBtn.style.opacity = isLast ? "0.3" : "1";
+    if (!isLast) {
+      downBtn.addEventListener("click", () => {
+        const arr = this._config.entities;
+        [arr[idx], arr[idx + 1]] = [arr[idx + 1], arr[idx]];
+        if (this._expandedEntity === idx) this._expandedEntity = idx + 1;
+        this._fireConfigChanged(); this._render();
+      });
+    }
+    main.appendChild(downBtn);
+
+    // Remove
+    const removeBtn = document.createElement("ha-icon-button");
+    removeBtn.innerHTML = `<ha-icon icon="mdi:close"></ha-icon>`;
+    removeBtn.addEventListener("click", () => {
+      this._config.entities.splice(idx, 1);
+      if (this._expandedEntity === idx) this._expandedEntity = -1;
+      else if (this._expandedEntity > idx) this._expandedEntity--;
+      this._fireConfigChanged(); this._render();
+    });
+    main.appendChild(removeBtn);
+
+    row.appendChild(main);
+
+    // ── Expanded per-entity options panel ──
+    if (this._expandedEntity === idx) {
+      const opts = document.createElement("div");
+      opts.className = "entity-options";
+      const grid = document.createElement("div");
+      grid.className = "grid";
+
+      grid.appendChild(this._field("Name", "text", entCfg.name || "", (v) => {
+        if (v) this._config.entities[idx].name = v; else delete this._config.entities[idx].name;
+        this._fireConfigChanged();
+      }));
+      grid.appendChild(this._field("Icon", "text", entCfg.icon || "", (v) => {
+        if (v) this._config.entities[idx].icon = v; else delete this._config.entities[idx].icon;
+        this._fireConfigChanged();
+      }));
+      grid.appendChild(this._field("Attribute", "text", entCfg.attribute || "", (v) => {
+        if (v) this._config.entities[idx].attribute = v; else delete this._config.entities[idx].attribute;
+        this._fireConfigChanged();
+      }));
+      grid.appendChild(this._field("Unit", "text", entCfg.unit_of_measurement || "", (v) => {
+        if (v) this._config.entities[idx].unit_of_measurement = v; else delete this._config.entities[idx].unit_of_measurement;
+        this._fireConfigChanged();
+      }));
+      grid.appendChild(this._field("Color", "text", entCfg.color || "", (v) => {
+        if (v) this._config.entities[idx].color = v; else delete this._config.entities[idx].color;
+        this._fireConfigChanged();
+      }));
+      grid.appendChild(this._field("Min", "number", entCfg.min ?? "", (v) => {
+        if (v !== "" && v !== null) this._config.entities[idx].min = Number(v); else delete this._config.entities[idx].min;
+        this._fireConfigChanged();
+      }));
+      grid.appendChild(this._field("Max", "number", entCfg.max ?? "", (v) => {
+        if (v !== "" && v !== null) this._config.entities[idx].max = Number(v); else delete this._config.entities[idx].max;
+        this._fireConfigChanged();
+      }));
+      grid.appendChild(this._field("Target", "number", entCfg.target ?? "", (v) => {
+        if (v !== "" && v !== null) this._config.entities[idx].target = Number(v); else delete this._config.entities[idx].target;
+        this._fireConfigChanged();
+      }));
+
+      opts.appendChild(grid);
+
+      const sevHint = document.createElement("div");
+      sevHint.className = "hint";
+      sevHint.textContent = "For severity rules, use the YAML editor.";
+      opts.appendChild(sevHint);
+
+      row.appendChild(opts);
+    }
+
+    return row;
+  }
+
+  // ─── Reusable editor widgets ───────────────────────────────────────────────
+
+  _field(label, type, value, onChange) {
+    const wrap = document.createElement("div"); wrap.className = "field";
+    const lbl = document.createElement("label"); lbl.textContent = label; wrap.appendChild(lbl);
+    const input = document.createElement("input");
+    input.type = type; input.value = value ?? "";
+    input.addEventListener("change", (e) => onChange(e.target.value));
+    wrap.appendChild(input); return wrap;
+  }
+
+  _select(label, value, options, onChange) {
+    const wrap = document.createElement("div"); wrap.className = "field";
+    const lbl = document.createElement("label"); lbl.textContent = label; wrap.appendChild(lbl);
+    const sel = document.createElement("select");
+    for (const opt of options) {
+      const o = document.createElement("option");
+      o.value = opt.value; o.textContent = opt.label;
+      if (opt.value === value) o.selected = true;
+      sel.appendChild(o);
+    }
+    sel.addEventListener("change", (e) => onChange(e.target.value));
+    wrap.appendChild(sel); return wrap;
+  }
+
+  _toggle(label, checked, onChange) {
+    const wrap = document.createElement("div"); wrap.className = "field toggle-field";
+    const lbl = document.createElement("label"); lbl.textContent = label; wrap.appendChild(lbl);
+    const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = checked;
+    cb.addEventListener("change", (e) => onChange(e.target.checked));
+    wrap.appendChild(cb); return wrap;
+  }
+
+  // ─── Editor styles ─────────────────────────────────────────────────────────
+
+  static _styles() {
+    return /* css */ `
+      :host { display: block; }
+      .editor {
+        display: flex; flex-direction: column; gap: 16px;
+        padding: 16px 0;
+        font-family: var(--paper-font-body1_-_font-family, Roboto, sans-serif);
+        font-size: 14px; color: var(--primary-text-color);
+      }
+      .section {
+        border: 1px solid var(--divider-color, #e0e0e0);
+        border-radius: 8px; padding: 12px;
+      }
+      .section-header {
+        display: flex; align-items: center; justify-content: space-between;
+        font-weight: 500; font-size: 15px; margin-bottom: 8px;
+      }
+      .section-header.clickable { cursor: pointer; user-select: none; }
+      .section-body { margin-top: 8px; }
+      .sub-label { font-weight: 500; font-size: 13px; margin: 12px 0 4px; opacity: 0.7; }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 8px;
+      }
+      .field { display: flex; flex-direction: column; gap: 4px; }
+      .field label { font-size: 12px; font-weight: 500; opacity: 0.7; }
+      .field input, .field select {
+        padding: 8px; border-radius: 6px;
+        border: 1px solid var(--divider-color, #ccc);
+        background: var(--card-background-color, #fff);
+        color: var(--primary-text-color);
+        font-size: 14px; font-family: inherit;
+        outline: none; width: 100%; box-sizing: border-box;
+      }
+      .field input:focus, .field select:focus { border-color: var(--primary-color); }
+      .toggle-field { flex-direction: row; align-items: center; gap: 8px; }
+      .toggle-field input { width: auto; }
+
+      .entity-list {
+        display: flex; flex-direction: column; gap: 4px;
+        max-height: 500px; overflow-y: auto; margin-bottom: 8px;
+      }
+      .entity-row {
+        border: 1px solid var(--divider-color, #e0e0e0);
+        border-radius: 8px; overflow: hidden;
+      }
+      .entity-main {
+        display: flex; align-items: center; gap: 4px;
+        padding: 4px 4px 4px 8px;
+      }
+      .entity-main ha-entity-picker { flex: 1; min-width: 0; }
+      .entity-main ha-icon-button {
+        --mdc-icon-button-size: 36px; --mdc-icon-size: 20px; flex-shrink: 0;
+      }
+      .entity-options {
+        padding: 8px 12px 12px;
+        border-top: 1px solid var(--divider-color, #e0e0e0);
+        background: var(--secondary-background-color, #f5f5f5);
+      }
+      .hint { font-size: 12px; opacity: 0.5; margin-top: 8px; font-style: italic; }
+
+      ha-button { --mdc-theme-primary: var(--primary-color); align-self: flex-end; }
+    `;
+  }
+}
+
+customElements.define("bar-card-editor", BarCardEditor);
+
+
+// ─── Card Picker Registration ────────────────────────────────────────────────
+
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "bar-card",
