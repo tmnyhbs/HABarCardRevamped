@@ -79,24 +79,29 @@ function fireEvent(node, type, detail) {
   node.dispatchEvent(new CustomEvent(type, { bubbles: true, composed: true, detail }));
 }
 
-// Zone coloration: 5-zone system with 4 thresholds and 3 colors
-// cold → cool → comfort → warm → hot
-// color_low (outer extremes), color_mid (caution), color_high (comfort)
+// Zone coloration: 5-zone system with 4 thresholds and 3 colors.
+// Values below t1 or above t4 get color_outer (danger).
+// Values between t1–t2 or t3–t4 get color_warning (caution).
+// Values between t2–t3 get color_ok (comfort/ideal).
 function zoneColor(value, zones) {
   if (value == null || isNaN(value) || !zones) return null;
-  const cold = zones.cold_threshold ?? 55;
-  const cool = zones.cool_threshold ?? 62;
-  const warm = zones.warm_threshold ?? 78;
-  const hot  = zones.hot_threshold  ?? 85;
-  const cLow  = zones.color_low  || "#E24B4A";
-  const cMid  = zones.color_mid  || "#EF9F27";
-  const cHigh = zones.color_high || "#5DCAA5";
+  const t1 = zones.min_danger;
+  const t2 = zones.min_warning;
+  const t3 = zones.max_warning;
+  const t4 = zones.max_danger;
+  // Need at least some thresholds defined to do anything
+  if (t1 == null && t2 == null && t3 == null && t4 == null) return null;
+  const cOuter   = zones.color_danger  || "#E24B4A";
+  const cWarning = zones.color_warning || "#EF9F27";
+  const cOk      = zones.color_ok      || "#5DCAA5";
 
-  if (value < cold) return cLow;
-  if (value < cool) return cMid;
-  if (value <= warm) return cHigh;
-  if (value <= hot)  return cMid;
-  return cLow;
+  if (t1 != null && value < t1) return cOuter;
+  if (t2 != null && value < t2) return cWarning;
+  if (t3 != null && t4 != null && value > t4) return cOuter;
+  if (t3 != null && value > t3) return cWarning;
+  // If we got here and at least t2 or t3 is set, we're in the OK zone
+  if (t2 != null || t3 != null) return cOk;
+  return null;
 }
 
 
@@ -553,9 +558,10 @@ class BarCardEditor extends HTMLElement {
     const firstHass = !this._hass;
     this._hass = hass;
     if (firstHass && this._config && this._config.entities) {
-      // First hass arrival — re-render so pickers are created with hass
+      // First hass arrival — re-render so pickers are created with hass available
       this._render();
     } else if (this.shadowRoot) {
+      // Subsequent updates — push new hass to existing upgraded pickers
       this.shadowRoot.querySelectorAll("ha-entity-picker").forEach((el) => {
         el.hass = hass;
       });
@@ -759,65 +765,35 @@ class BarCardEditor extends HTMLElement {
     zonesHint.className = "hint";
     zonesHint.style.marginTop = "0";
     zonesHint.style.marginBottom = "8px";
-    zonesHint.textContent = "Five-zone color system: outer → caution → comfort → caution → outer";
+    zonesHint.textContent = "Five-zone color system: danger → warning → OK → warning → danger";
     appBody.appendChild(zonesHint);
 
-    const zones = this._config.zones || {};
-    const zonesGrid = document.createElement("div");
-    zonesGrid.className = "grid";
-    zonesGrid.appendChild(this._field("Cold Threshold", "number", zones.cold_threshold ?? "", (v) => {
-      if (!this._config.zones) this._config.zones = {};
-      if (v !== "" && v !== null) this._config.zones.cold_threshold = Number(v); else delete this._config.zones.cold_threshold;
-      this._cleanZones(); this._fireConfigChanged();
+    appBody.appendChild(this._zonesFields(this._config.zones || {}, (zones) => {
+      if (zones) this._config.zones = zones; else delete this._config.zones;
+      this._fireConfigChanged();
     }));
-    zonesGrid.appendChild(this._field("Cool Threshold", "number", zones.cool_threshold ?? "", (v) => {
-      if (!this._config.zones) this._config.zones = {};
-      if (v !== "" && v !== null) this._config.zones.cool_threshold = Number(v); else delete this._config.zones.cool_threshold;
-      this._cleanZones(); this._fireConfigChanged();
-    }));
-    zonesGrid.appendChild(this._field("Warm Threshold", "number", zones.warm_threshold ?? "", (v) => {
-      if (!this._config.zones) this._config.zones = {};
-      if (v !== "" && v !== null) this._config.zones.warm_threshold = Number(v); else delete this._config.zones.warm_threshold;
-      this._cleanZones(); this._fireConfigChanged();
-    }));
-    zonesGrid.appendChild(this._field("Hot Threshold", "number", zones.hot_threshold ?? "", (v) => {
-      if (!this._config.zones) this._config.zones = {};
-      if (v !== "" && v !== null) this._config.zones.hot_threshold = Number(v); else delete this._config.zones.hot_threshold;
-      this._cleanZones(); this._fireConfigChanged();
-    }));
-    zonesGrid.appendChild(this._field("Outer Color", "color", zones.color_low || "#E24B4A", (v) => {
-      if (!this._config.zones) this._config.zones = {};
-      this._config.zones.color_low = v; this._fireConfigChanged();
-    }));
-    zonesGrid.appendChild(this._field("Caution Color", "color", zones.color_mid || "#EF9F27", (v) => {
-      if (!this._config.zones) this._config.zones = {};
-      this._config.zones.color_mid = v; this._fireConfigChanged();
-    }));
-    zonesGrid.appendChild(this._field("Comfort Color", "color", zones.color_high || "#5DCAA5", (v) => {
-      if (!this._config.zones) this._config.zones = {};
-      this._config.zones.color_high = v; this._fireConfigChanged();
-    }));
-    appBody.appendChild(zonesGrid);
 
     appSection.appendChild(appBody);
     wrap.appendChild(appSection);
     root.appendChild(wrap);
 
-    // Assign hass to entity pickers after they're in the DOM and upgraded.
-    // ha-entity-picker needs hass to resolve friendly names; setting value
-    // after hass triggers the label to render.
+    // Wait for ha-entity-picker to be defined, then set hass + value.
+    // Properties set before upgrade are lost, so we defer everything.
     if (this._hass) {
-      const pickers = root.querySelectorAll("ha-entity-picker");
-      pickers.forEach((el) => { el.hass = this._hass; });
-      // Re-set value after a microtask so upgraded pickers re-render labels
-      requestAnimationFrame(() => {
+      const hass = this._hass;
+      customElements.whenDefined("ha-entity-picker").then(() => {
+        const pickers = root.querySelectorAll("ha-entity-picker");
         pickers.forEach((el) => {
-          el.hass = this._hass;
-          if (el.value) {
-            const v = el.value;
-            el.value = "";
-            el.value = v;
-          }
+          el.hass = hass;
+          el.value = el.dataset.entityValue || "";
+        });
+        // Second pass after a frame to ensure labels render
+        requestAnimationFrame(() => {
+          pickers.forEach((el) => {
+            el.hass = hass;
+            const v = el.dataset.entityValue || "";
+            if (v) { el.value = ""; el.value = v; }
+          });
         });
       });
     }
@@ -832,11 +808,10 @@ class BarCardEditor extends HTMLElement {
     const main = document.createElement("div");
     main.className = "entity-main";
 
-    // Entity picker
+    // Entity picker — properties are set after DOM insertion (see end of _render)
     const picker = document.createElement("ha-entity-picker");
     picker.allowCustomEntity = true;
-    if (this._hass) picker.hass = this._hass;
-    picker.value = entCfg.entity || "";
+    picker.dataset.entityValue = entCfg.entity || "";
     picker.addEventListener("value-changed", (ev) => {
       this._config.entities[idx].entity = ev.detail.value || "";
       this._fireConfigChanged();
@@ -937,9 +912,20 @@ class BarCardEditor extends HTMLElement {
 
       opts.appendChild(grid);
 
+      // Per-entity zone colors
+      const entZonesLabel = document.createElement("div");
+      entZonesLabel.className = "sub-label"; entZonesLabel.textContent = "Zone Colors";
+      opts.appendChild(entZonesLabel);
+
+      opts.appendChild(this._zonesFields(entCfg.zones || {}, (zones) => {
+        if (zones) this._config.entities[idx].zones = zones;
+        else delete this._config.entities[idx].zones;
+        this._fireConfigChanged();
+      }));
+
       const sevHint = document.createElement("div");
       sevHint.className = "hint";
-      sevHint.textContent = "For severity rules, use the YAML editor.";
+      sevHint.textContent = "For severity rules, use the YAML editor. Per-entity zones override card-level zones.";
       opts.appendChild(sevHint);
 
       row.appendChild(opts);
@@ -948,16 +934,31 @@ class BarCardEditor extends HTMLElement {
     return row;
   }
 
-  // Remove empty zones object from config
-  _cleanZones() {
-    if (!this._config.zones) return;
-    const hasThreshold = Object.keys(this._config.zones).some(
-      (k) => k.includes("threshold") && this._config.zones[k] != null
-    );
-    const hasColor = Object.keys(this._config.zones).some(
-      (k) => k.startsWith("color_") && this._config.zones[k]
-    );
-    if (!hasThreshold && !hasColor) delete this._config.zones;
+  // Reusable zone editor grid — used for both card-level and per-entity zones.
+  // onChange(zones) is called with the updated object, or null if all cleared.
+  _zonesFields(zones, onChange) {
+    const grid = document.createElement("div");
+    grid.className = "grid";
+
+    const _set = (key, val) => {
+      const z = { ...zones };
+      if (val !== "" && val !== null && val !== undefined) z[key] = typeof val === "string" && !key.startsWith("color") ? Number(val) : val;
+      else delete z[key];
+      // Clean: if nothing meaningful remains, signal null
+      const hasVal = Object.values(z).some((v) => v != null && v !== "");
+      onChange(hasVal ? z : null);
+      zones = hasVal ? z : {};
+    };
+
+    grid.appendChild(this._field("Danger Below", "number", zones.min_danger ?? "", (v) => _set("min_danger", v)));
+    grid.appendChild(this._field("Warning Below", "number", zones.min_warning ?? "", (v) => _set("min_warning", v)));
+    grid.appendChild(this._field("Warning Above", "number", zones.max_warning ?? "", (v) => _set("max_warning", v)));
+    grid.appendChild(this._field("Danger Above", "number", zones.max_danger ?? "", (v) => _set("max_danger", v)));
+    grid.appendChild(this._field("Danger Color", "color", zones.color_danger || "#E24B4A", (v) => _set("color_danger", v)));
+    grid.appendChild(this._field("Warning Color", "color", zones.color_warning || "#EF9F27", (v) => _set("color_warning", v)));
+    grid.appendChild(this._field("OK Color", "color", zones.color_ok || "#5DCAA5", (v) => _set("color_ok", v)));
+
+    return grid;
   }
 
   // ─── Reusable editor widgets ───────────────────────────────────────────────

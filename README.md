@@ -108,28 +108,36 @@ Each severity entry supports: `from`, `to`, `color`, `icon`, `hide`, `text` (for
 
 ### Zones
 
-Five-zone color system — the same logic used by [Zone Tile Card](https://github.com/tmnyhbs/ZoneTileCardForHomeAssistant). The bar color changes across five zones based on four thresholds and three configurable colors. Great for temperature, humidity, CO₂, or any sensor with a "comfortable range":
+Five-zone color system inspired by [Zone Tile Card](https://github.com/tmnyhbs/ZoneTileCardForHomeAssistant). The bar color changes across five zones based on four thresholds and three configurable colors. Works for any sensor with an ideal range — temperature, humidity, shot times, CO₂, soil moisture, etc.
 
-| Zone | Default Color | Condition |
+| Zone | Color | Condition |
 |---|---|---|
-| Cold | Outer (`#E24B4A`) | Below cold threshold |
-| Cool | Caution (`#EF9F27`) | Between cold and cool |
-| Comfort | Comfort (`#5DCAA5`) | Between cool and warm |
-| Warm | Caution (`#EF9F27`) | Between warm and hot |
-| Hot | Outer (`#E24B4A`) | Above hot threshold |
+| Danger (low) | `color_danger` (`#E24B4A`) | Below `min_danger` |
+| Warning (low) | `color_warning` (`#EF9F27`) | Between `min_danger` and `min_warning` |
+| OK | `color_ok` (`#5DCAA5`) | Between `min_warning` and `max_warning` |
+| Warning (high) | `color_warning` (`#EF9F27`) | Between `max_warning` and `max_danger` |
+| Danger (high) | `color_danger` (`#E24B4A`) | Above `max_danger` |
 
 ```yaml
+# Temperature example
 zones:
-  cold_threshold: 55
-  cool_threshold: 62
-  warm_threshold: 78
-  hot_threshold: 85
-  color_low: "#E24B4A"
-  color_mid: "#EF9F27"
-  color_high: "#5DCAA5"
+  min_danger: 55
+  min_warning: 62
+  max_warning: 78
+  max_danger: 85
+
+# Espresso shot time example
+zones:
+  min_danger: 20
+  min_warning: 27
+  max_warning: 32
+  max_danger: 35
+  color_danger: "#E24B4A"
+  color_warning: "#EF9F27"
+  color_ok: "#5DCAA5"
 ```
 
-All zone options are configurable from the visual editor under Appearance → Zone Colors. Zones can be used alongside or instead of severity — if both are present, zones take priority for color.
+Zones can be set at the card level (applies to all entities) or per-entity for individual overrides. All zone options are configurable from the visual editor — card-level under Appearance → Zone Colors, per-entity via the tune icon (⚙) on each entity row. If both severity and zones are defined, zones take priority.
 
 ### Animation
 
