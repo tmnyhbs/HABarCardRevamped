@@ -79,6 +79,26 @@ function fireEvent(node, type, detail) {
   node.dispatchEvent(new CustomEvent(type, { bubbles: true, composed: true, detail }));
 }
 
+// Zone coloration: 5-zone system with 4 thresholds and 3 colors
+// cold → cool → comfort → warm → hot
+// color_low (outer extremes), color_mid (caution), color_high (comfort)
+function zoneColor(value, zones) {
+  if (value == null || isNaN(value) || !zones) return null;
+  const cold = zones.cold_threshold ?? 55;
+  const cool = zones.cool_threshold ?? 62;
+  const warm = zones.warm_threshold ?? 78;
+  const hot  = zones.hot_threshold  ?? 85;
+  const cLow  = zones.color_low  || "#E24B4A";
+  const cMid  = zones.color_mid  || "#EF9F27";
+  const cHigh = zones.color_high || "#5DCAA5";
+
+  if (value < cold) return cLow;
+  if (value < cool) return cMid;
+  if (value <= warm) return cHigh;
+  if (value <= hot)  return cMid;
+  return cLow;
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN CARD ELEMENT
@@ -228,6 +248,7 @@ class BarCard extends HTMLElement {
 
     let barColor = config.color;
     if (config.severity) barColor = this._severityColor(rawValue, numericValue, config.severity) || barColor;
+    if (config.zones && numericValue !== null) barColor = zoneColor(numericValue, config.zones) || barColor;
     if (rawValue === "unavailable") barColor = `var(--bar-card-disabled-color, var(--disabled-color, ${config.color}))`;
 
     const prevKey = `${config.entity}_${config.attribute || ""}`;
@@ -529,8 +550,12 @@ class BarCardEditor extends HTMLElement {
   }
 
   set hass(hass) {
+    const firstHass = !this._hass;
     this._hass = hass;
-    if (this.shadowRoot) {
+    if (firstHass && this._config && this._config.entities) {
+      // First hass arrival — re-render so pickers are created with hass
+      this._render();
+    } else if (this.shadowRoot) {
       this.shadowRoot.querySelectorAll("ha-entity-picker").forEach((el) => {
         el.hass = hass;
       });
@@ -726,13 +751,75 @@ class BarCardEditor extends HTMLElement {
     }));
     appBody.appendChild(animGrid);
 
+    // Zones
+    const zonesLabel = document.createElement("div");
+    zonesLabel.className = "sub-label"; zonesLabel.textContent = "Zone Colors";
+    appBody.appendChild(zonesLabel);
+    const zonesHint = document.createElement("div");
+    zonesHint.className = "hint";
+    zonesHint.style.marginTop = "0";
+    zonesHint.style.marginBottom = "8px";
+    zonesHint.textContent = "Five-zone color system: outer → caution → comfort → caution → outer";
+    appBody.appendChild(zonesHint);
+
+    const zones = this._config.zones || {};
+    const zonesGrid = document.createElement("div");
+    zonesGrid.className = "grid";
+    zonesGrid.appendChild(this._field("Cold Threshold", "number", zones.cold_threshold ?? "", (v) => {
+      if (!this._config.zones) this._config.zones = {};
+      if (v !== "" && v !== null) this._config.zones.cold_threshold = Number(v); else delete this._config.zones.cold_threshold;
+      this._cleanZones(); this._fireConfigChanged();
+    }));
+    zonesGrid.appendChild(this._field("Cool Threshold", "number", zones.cool_threshold ?? "", (v) => {
+      if (!this._config.zones) this._config.zones = {};
+      if (v !== "" && v !== null) this._config.zones.cool_threshold = Number(v); else delete this._config.zones.cool_threshold;
+      this._cleanZones(); this._fireConfigChanged();
+    }));
+    zonesGrid.appendChild(this._field("Warm Threshold", "number", zones.warm_threshold ?? "", (v) => {
+      if (!this._config.zones) this._config.zones = {};
+      if (v !== "" && v !== null) this._config.zones.warm_threshold = Number(v); else delete this._config.zones.warm_threshold;
+      this._cleanZones(); this._fireConfigChanged();
+    }));
+    zonesGrid.appendChild(this._field("Hot Threshold", "number", zones.hot_threshold ?? "", (v) => {
+      if (!this._config.zones) this._config.zones = {};
+      if (v !== "" && v !== null) this._config.zones.hot_threshold = Number(v); else delete this._config.zones.hot_threshold;
+      this._cleanZones(); this._fireConfigChanged();
+    }));
+    zonesGrid.appendChild(this._field("Outer Color", "color", zones.color_low || "#E24B4A", (v) => {
+      if (!this._config.zones) this._config.zones = {};
+      this._config.zones.color_low = v; this._fireConfigChanged();
+    }));
+    zonesGrid.appendChild(this._field("Caution Color", "color", zones.color_mid || "#EF9F27", (v) => {
+      if (!this._config.zones) this._config.zones = {};
+      this._config.zones.color_mid = v; this._fireConfigChanged();
+    }));
+    zonesGrid.appendChild(this._field("Comfort Color", "color", zones.color_high || "#5DCAA5", (v) => {
+      if (!this._config.zones) this._config.zones = {};
+      this._config.zones.color_high = v; this._fireConfigChanged();
+    }));
+    appBody.appendChild(zonesGrid);
+
     appSection.appendChild(appBody);
     wrap.appendChild(appSection);
     root.appendChild(wrap);
 
-    // Assign hass to entity pickers
+    // Assign hass to entity pickers after they're in the DOM and upgraded.
+    // ha-entity-picker needs hass to resolve friendly names; setting value
+    // after hass triggers the label to render.
     if (this._hass) {
-      root.querySelectorAll("ha-entity-picker").forEach((el) => { el.hass = this._hass; });
+      const pickers = root.querySelectorAll("ha-entity-picker");
+      pickers.forEach((el) => { el.hass = this._hass; });
+      // Re-set value after a microtask so upgraded pickers re-render labels
+      requestAnimationFrame(() => {
+        pickers.forEach((el) => {
+          el.hass = this._hass;
+          if (el.value) {
+            const v = el.value;
+            el.value = "";
+            el.value = v;
+          }
+        });
+      });
     }
   }
 
@@ -861,6 +948,18 @@ class BarCardEditor extends HTMLElement {
     return row;
   }
 
+  // Remove empty zones object from config
+  _cleanZones() {
+    if (!this._config.zones) return;
+    const hasThreshold = Object.keys(this._config.zones).some(
+      (k) => k.includes("threshold") && this._config.zones[k] != null
+    );
+    const hasColor = Object.keys(this._config.zones).some(
+      (k) => k.startsWith("color_") && this._config.zones[k]
+    );
+    if (!hasThreshold && !hasColor) delete this._config.zones;
+  }
+
   // ─── Reusable editor widgets ───────────────────────────────────────────────
 
   _field(label, type, value, onChange) {
@@ -868,7 +967,9 @@ class BarCardEditor extends HTMLElement {
     const lbl = document.createElement("label"); lbl.textContent = label; wrap.appendChild(lbl);
     const input = document.createElement("input");
     input.type = type; input.value = value ?? "";
-    input.addEventListener("change", (e) => onChange(e.target.value));
+    // Color inputs fire "input" continuously while picking; others use "change"
+    const evt = type === "color" ? "input" : "change";
+    input.addEventListener(evt, (e) => onChange(e.target.value));
     wrap.appendChild(input); return wrap;
   }
 
@@ -935,6 +1036,12 @@ class BarCardEditor extends HTMLElement {
       .field input:focus, .field select:focus { border-color: var(--primary-color); }
       .toggle-field { flex-direction: row; align-items: center; gap: 8px; }
       .toggle-field input { width: auto; }
+      input[type="color"] {
+        height: 36px; padding: 2px; cursor: pointer;
+        border: 1px solid var(--divider-color, #ccc);
+        border-radius: 6px;
+        background: var(--card-background-color, #fff);
+      }
 
       .entity-list {
         display: flex; flex-direction: column; gap: 4px;

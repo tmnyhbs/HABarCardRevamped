@@ -4,7 +4,7 @@ A custom bar/gauge card for [Home Assistant](https://www.home-assistant.io/) das
 
 Rebuilt from the ground up for modern Home Assistant (2026+), this card displays entity values as horizontal or vertical progress bars with rich customization options.
 
-## What's New
+## What's New in v4
 
 - **Zero build step** — single `.js` file, no bundler or transpiler needed.
 - **Modern standards** — vanilla `HTMLElement` with Shadow DOM; no decorators, no `custom-card-helpers` dependency.
@@ -68,6 +68,7 @@ entity: sensor.cpu_usage
 | `complementary` | boolean | `false` | Display `max - value` instead of value. |
 | `target` | number | — | Show a target marker at this value. |
 | `entity_row` | boolean | `false` | Transparent mode for use inside an entities card. |
+| `zones` | object | — | Five-zone coloration. See [Zones](#zones). |
 | `tap_action` | object | `more-info` | Action on tap (see Actions below). |
 
 *One of `entity` or `entities` is required.
@@ -104,6 +105,31 @@ severity:
 ```
 
 Each severity entry supports: `from`, `to`, `color`, `icon`, `hide`, `text` (for non-numeric states).
+
+### Zones
+
+Five-zone color system — the same logic used by [Zone Tile Card](https://github.com/tmnyhbs/ZoneTileCardForHomeAssistant). The bar color changes across five zones based on four thresholds and three configurable colors. Great for temperature, humidity, CO₂, or any sensor with a "comfortable range":
+
+| Zone | Default Color | Condition |
+|---|---|---|
+| Cold | Outer (`#E24B4A`) | Below cold threshold |
+| Cool | Caution (`#EF9F27`) | Between cold and cool |
+| Comfort | Comfort (`#5DCAA5`) | Between cool and warm |
+| Warm | Caution (`#EF9F27`) | Between warm and hot |
+| Hot | Outer (`#E24B4A`) | Above hot threshold |
+
+```yaml
+zones:
+  cold_threshold: 55
+  cool_threshold: 62
+  warm_threshold: 78
+  hot_threshold: 85
+  color_low: "#E24B4A"
+  color_mid: "#EF9F27"
+  color_high: "#5DCAA5"
+```
+
+All zone options are configurable from the visual editor under Appearance → Zone Colors. Zones can be used alongside or instead of severity — if both are present, zones take priority for color.
 
 ### Animation
 

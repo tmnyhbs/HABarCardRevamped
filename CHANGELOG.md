@@ -10,6 +10,7 @@ Bar Card Revamped has been rebuilt from the ground up for modern Home Assistant 
 
 - **Zero build step** — single vanilla JS file, no bundler, transpiler, or external dependencies.
 - **Custom visual editor** — full `getConfigElement()` editor with multi-entity support: add, remove, reorder entities, expand per-entity overrides (name, icon, attribute, unit, color, min, max, target).
+- **Zone coloration** — five-zone color system (cold/cool/comfort/warm/hot) with 4 thresholds and 3 configurable colors. Same logic as [Zone Tile Card](https://github.com/tmnyhbs/ZoneTileCardForHomeAssistant), with color pickers in the visual editor.
 - **Sections view support** — implements `getGridOptions()` for proper sizing in the sections layout.
 - **Card picker registration** — appears in the "Add Card" dialog via `window.customCards`.
 - **Shadow DOM** — proper encapsulation replaces the old inline `<style>` tag approach.
