@@ -80,16 +80,12 @@ function fireEvent(node, type, detail) {
 }
 
 // Zone coloration: 5-zone system with 4 thresholds and 3 colors.
-// Values below t1 or above t4 get color_outer (danger).
-// Values between t1–t2 or t3–t4 get color_warning (caution).
-// Values between t2–t3 get color_ok (comfort/ideal).
 function zoneColor(value, zones) {
   if (value == null || isNaN(value) || !zones) return null;
   const t1 = zones.min_danger;
   const t2 = zones.min_warning;
   const t3 = zones.max_warning;
   const t4 = zones.max_danger;
-  // Need at least some thresholds defined to do anything
   if (t1 == null && t2 == null && t3 == null && t4 == null) return null;
   const cOuter   = zones.color_danger  || "#E24B4A";
   const cWarning = zones.color_warning || "#EF9F27";
@@ -99,7 +95,6 @@ function zoneColor(value, zones) {
   if (t2 != null && value < t2) return cWarning;
   if (t3 != null && t4 != null && value > t4) return cOuter;
   if (t3 != null && value > t3) return cWarning;
-  // If we got here and at least t2 or t3 is set, we're in the OK zone
   if (t2 != null || t3 != null) return cOk;
   return null;
 }
@@ -157,16 +152,17 @@ class BarCard extends HTMLElement {
   getCardSize() {
     const h = typeof this._config.height === "number" ? this._config.height : parseInt(this._config.height) || 40;
     const rows = Math.ceil(this._configArray.length / (this._config.columns || 1));
+    const contentHeight = (h * rows) + (8 * Math.max(0, rows - 1)) + 32;
     const titleSize = this._config.title ? 1 : 0;
-    return Math.max(1, Math.round((h * rows) / 50) + 1 + titleSize);
+    return Math.max(2, Math.ceil(contentHeight / 50) + titleSize);
   }
 
   getGridOptions() {
     const barRows = Math.max(1, Math.ceil(this._configArray.length / (this._config.columns || 1)));
     const titleRows = this._config.title ? 1 : 0;
     return {
-      rows: barRows + titleRows,
-      columns: 12, min_rows: 1, min_columns: 3,
+      rows: barRows + titleRows + 1,
+      columns: 12, min_rows: 2, min_columns: 3,
     };
   }
 
@@ -177,8 +173,6 @@ class BarCard extends HTMLElement {
   static getStubConfig() {
     return { entity: "", min: 0, max: 100 };
   }
-
-  // ─── Rendering ──────────────────────────────────────────────────────────────
 
   _render() {
     if (!this._hass || !this._config) return;
@@ -451,10 +445,9 @@ class BarCard extends HTMLElement {
   static _styles() {
     return /* css */ `
       :host { display: block; }
-      ha-card { display: flex; flex-direction: column; overflow: hidden; }
+      ha-card { display: flex; flex-direction: column; }
       ha-card.entity-row-mode { background: transparent; box-shadow: none; border: none; }
-      .card-content { display: flex; flex-direction: column; gap: 8px; padding: 16px; flex-grow: 0; }
-      .card-content.grow { flex-grow: 1; }
+      .card-content { display: flex; flex-direction: column; gap: 8px; padding: 16px; }
       ha-card.entity-row-mode .card-content { padding: 0; }
 
       .bar-row { display: flex; flex-direction: column; }
@@ -542,6 +535,12 @@ customElements.define("bar-card", BarCard);
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // EDITOR ELEMENT
+//
+// Architecture: the editor ONLY rebuilds the DOM via _fullRender() when the
+// config structure changes (setConfig, add/remove/reorder entity).
+// When HA pushes a new hass object (which happens frequently), we do NOT
+// rebuild — we just update .hass on existing ha-entity-picker elements.
+// This preserves picker state and lets them render entity names reliably.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class BarCardEditor extends HTMLElement {
@@ -552,23 +551,20 @@ class BarCardEditor extends HTMLElement {
     this._config = {};
     this._hass = null;
     this._expandedEntity = -1;
-    this._renderGen = 0; // incremented on each render to cancel stale picker inits
   }
 
+  // Called frequently by HA on every state change.
+  // CRITICAL: do NOT rebuild DOM here. Just update existing pickers.
   set hass(hass) {
-    const firstHass = !this._hass;
     this._hass = hass;
-    if (firstHass && this._config && this._config.entities) {
-      // First hass arrival — re-render so pickers are created with hass available
-      this._render();
-    } else if (this.shadowRoot) {
-      // Subsequent updates — push new hass to existing upgraded pickers
+    if (this.shadowRoot) {
       this.shadowRoot.querySelectorAll("ha-entity-picker").forEach((el) => {
         el.hass = hass;
       });
     }
   }
 
+  // Called by HA when config changes (including our own fireConfigChanged).
   setConfig(config) {
     this._config = { ...config };
 
@@ -583,7 +579,7 @@ class BarCardEditor extends HTMLElement {
       typeof e === "string" ? { entity: e } : { ...e }
     );
 
-    this._render();
+    this._fullRender();
   }
 
   _fireConfigChanged() {
@@ -602,10 +598,9 @@ class BarCardEditor extends HTMLElement {
     fireEvent(this, "config-changed", { config: cfg });
   }
 
-  // ─── Full editor render ────────────────────────────────────────────────────
+  // ─── Full DOM build — only called on structural config changes ────────────
 
-  _render() {
-    this._renderGen++;
+  _fullRender() {
     const root = this.shadowRoot;
     root.innerHTML = "";
 
@@ -647,7 +642,7 @@ class BarCardEditor extends HTMLElement {
       this._config.entities = this._config.entities || [];
       this._config.entities.push({ entity: "" });
       this._fireConfigChanged();
-      this._render();
+      this._fullRender();
     });
     entSection.appendChild(addBtn);
     wrap.appendChild(entSection);
@@ -778,37 +773,9 @@ class BarCardEditor extends HTMLElement {
     appSection.appendChild(appBody);
     wrap.appendChild(appSection);
     root.appendChild(wrap);
-
-    // ha-entity-picker is a LitElement that renders asynchronously.
-    // Properties set before its internal shadow DOM is ready are silently lost.
-    // We retry with increasing delays until the pickers accept values.
-    this._initPickers(root, this._renderGen);
   }
 
-  _initPickers(root, gen, attempt = 0) {
-    // Bail out if a newer render has happened (DOM was replaced)
-    if (!this._hass || gen !== this._renderGen) return;
-    const hass = this._hass;
-    const pickers = root.querySelectorAll("ha-entity-picker");
-    if (!pickers.length) return;
-
-    pickers.forEach((el) => {
-      el.hass = hass;
-      const v = el.dataset.entityValue || "";
-      if (v) {
-        el.value = "";
-        el.value = v;
-      }
-    });
-
-    // Retry up to 5 times with increasing delays (50ms, 150ms, 300ms, 500ms, 1000ms)
-    if (attempt < 5) {
-      const delays = [50, 150, 300, 500, 1000];
-      setTimeout(() => this._initPickers(root, gen, attempt + 1), delays[attempt]);
-    }
-  }
-
-  // ─── Entity row with expand/collapse per-entity options ────────────────────
+  // ─── Entity row ────────────────────────────────────────────────────────────
 
   _entityRow(entCfg, idx) {
     const row = document.createElement("div");
@@ -817,10 +784,12 @@ class BarCardEditor extends HTMLElement {
     const main = document.createElement("div");
     main.className = "entity-main";
 
-    // Entity picker — properties are set after DOM insertion (see end of _render)
+    // Entity picker — create and set properties synchronously
     const picker = document.createElement("ha-entity-picker");
     picker.allowCustomEntity = true;
-    picker.dataset.entityValue = entCfg.entity || "";
+    // Set hass FIRST if available, then value — order matters for rendering
+    if (this._hass) picker.hass = this._hass;
+    picker.value = entCfg.entity || "";
     picker.addEventListener("value-changed", (ev) => {
       this._config.entities[idx].entity = ev.detail.value || "";
       this._fireConfigChanged();
@@ -833,7 +802,7 @@ class BarCardEditor extends HTMLElement {
     optBtn.title = "Entity options";
     optBtn.addEventListener("click", () => {
       this._expandedEntity = this._expandedEntity === idx ? -1 : idx;
-      this._render();
+      this._fullRender();
     });
     main.appendChild(optBtn);
 
@@ -846,7 +815,7 @@ class BarCardEditor extends HTMLElement {
         const arr = this._config.entities;
         [arr[idx - 1], arr[idx]] = [arr[idx], arr[idx - 1]];
         if (this._expandedEntity === idx) this._expandedEntity = idx - 1;
-        this._fireConfigChanged(); this._render();
+        this._fireConfigChanged(); this._fullRender();
       });
     }
     main.appendChild(upBtn);
@@ -861,7 +830,7 @@ class BarCardEditor extends HTMLElement {
         const arr = this._config.entities;
         [arr[idx], arr[idx + 1]] = [arr[idx + 1], arr[idx]];
         if (this._expandedEntity === idx) this._expandedEntity = idx + 1;
-        this._fireConfigChanged(); this._render();
+        this._fireConfigChanged(); this._fullRender();
       });
     }
     main.appendChild(downBtn);
@@ -873,13 +842,13 @@ class BarCardEditor extends HTMLElement {
       this._config.entities.splice(idx, 1);
       if (this._expandedEntity === idx) this._expandedEntity = -1;
       else if (this._expandedEntity > idx) this._expandedEntity--;
-      this._fireConfigChanged(); this._render();
+      this._fireConfigChanged(); this._fullRender();
     });
     main.appendChild(removeBtn);
 
     row.appendChild(main);
 
-    // ── Expanded per-entity options panel ──
+    // ── Expanded per-entity options ──
     if (this._expandedEntity === idx) {
       const opts = document.createElement("div");
       opts.className = "entity-options";
@@ -943,17 +912,19 @@ class BarCardEditor extends HTMLElement {
     return row;
   }
 
-  // Reusable zone editor grid — used for both card-level and per-entity zones.
-  // onChange(zones) is called with the updated object, or null if all cleared.
+  // ─── Zone fields builder (shared by card-level and per-entity) ─────────────
+
   _zonesFields(zones, onChange) {
     const grid = document.createElement("div");
     grid.className = "grid";
 
     const _set = (key, val) => {
       const z = { ...zones };
-      if (val !== "" && val !== null && val !== undefined) z[key] = typeof val === "string" && !key.startsWith("color") ? Number(val) : val;
-      else delete z[key];
-      // Clean: if nothing meaningful remains, signal null
+      if (val !== "" && val !== null && val !== undefined) {
+        z[key] = key.startsWith("color") ? val : Number(val);
+      } else {
+        delete z[key];
+      }
       const hasVal = Object.values(z).some((v) => v != null && v !== "");
       onChange(hasVal ? z : null);
       zones = hasVal ? z : {};
@@ -978,7 +949,6 @@ class BarCardEditor extends HTMLElement {
     const input = document.createElement("input");
     input.type = type; input.value = value ?? "";
     if (type === "number") input.step = "any";
-    // Color inputs fire "input" continuously while picking; others use "change"
     const evt = type === "color" ? "input" : "change";
     input.addEventListener(evt, (e) => onChange(e.target.value));
     wrap.appendChild(input); return wrap;
