@@ -552,6 +552,7 @@ class BarCardEditor extends HTMLElement {
     this._config = {};
     this._hass = null;
     this._expandedEntity = -1;
+    this._renderGen = 0; // incremented on each render to cancel stale picker inits
   }
 
   set hass(hass) {
@@ -604,6 +605,7 @@ class BarCardEditor extends HTMLElement {
   // ─── Full editor render ────────────────────────────────────────────────────
 
   _render() {
+    this._renderGen++;
     const root = this.shadowRoot;
     root.innerHTML = "";
 
@@ -777,25 +779,32 @@ class BarCardEditor extends HTMLElement {
     wrap.appendChild(appSection);
     root.appendChild(wrap);
 
-    // Wait for ha-entity-picker to be defined, then set hass + value.
-    // Properties set before upgrade are lost, so we defer everything.
-    if (this._hass) {
-      const hass = this._hass;
-      customElements.whenDefined("ha-entity-picker").then(() => {
-        const pickers = root.querySelectorAll("ha-entity-picker");
-        pickers.forEach((el) => {
-          el.hass = hass;
-          el.value = el.dataset.entityValue || "";
-        });
-        // Second pass after a frame to ensure labels render
-        requestAnimationFrame(() => {
-          pickers.forEach((el) => {
-            el.hass = hass;
-            const v = el.dataset.entityValue || "";
-            if (v) { el.value = ""; el.value = v; }
-          });
-        });
-      });
+    // ha-entity-picker is a LitElement that renders asynchronously.
+    // Properties set before its internal shadow DOM is ready are silently lost.
+    // We retry with increasing delays until the pickers accept values.
+    this._initPickers(root, this._renderGen);
+  }
+
+  _initPickers(root, gen, attempt = 0) {
+    // Bail out if a newer render has happened (DOM was replaced)
+    if (!this._hass || gen !== this._renderGen) return;
+    const hass = this._hass;
+    const pickers = root.querySelectorAll("ha-entity-picker");
+    if (!pickers.length) return;
+
+    pickers.forEach((el) => {
+      el.hass = hass;
+      const v = el.dataset.entityValue || "";
+      if (v) {
+        el.value = "";
+        el.value = v;
+      }
+    });
+
+    // Retry up to 5 times with increasing delays (50ms, 150ms, 300ms, 500ms, 1000ms)
+    if (attempt < 5) {
+      const delays = [50, 150, 300, 500, 1000];
+      setTimeout(() => this._initPickers(root, gen, attempt + 1), delays[attempt]);
     }
   }
 
@@ -968,6 +977,7 @@ class BarCardEditor extends HTMLElement {
     const lbl = document.createElement("label"); lbl.textContent = label; wrap.appendChild(lbl);
     const input = document.createElement("input");
     input.type = type; input.value = value ?? "";
+    if (type === "number") input.step = "any";
     // Color inputs fire "input" continuously while picking; others use "change"
     const evt = type === "color" ? "input" : "change";
     input.addEventListener(evt, (e) => onChange(e.target.value));
@@ -1046,11 +1056,11 @@ class BarCardEditor extends HTMLElement {
 
       .entity-list {
         display: flex; flex-direction: column; gap: 4px;
-        max-height: 500px; overflow-y: auto; margin-bottom: 8px;
+        margin-bottom: 8px;
       }
       .entity-row {
         border: 1px solid var(--divider-color, #e0e0e0);
-        border-radius: 8px; overflow: hidden;
+        border-radius: 8px;
       }
       .entity-main {
         display: flex; align-items: center; gap: 4px;
@@ -1064,6 +1074,7 @@ class BarCardEditor extends HTMLElement {
         padding: 8px 12px 12px;
         border-top: 1px solid var(--divider-color, #e0e0e0);
         background: var(--secondary-background-color, #f5f5f5);
+        border-radius: 0 0 8px 8px;
       }
       .hint { font-size: 12px; opacity: 0.5; margin-top: 8px; font-style: italic; }
 
